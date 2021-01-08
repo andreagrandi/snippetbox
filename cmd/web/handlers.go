@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/andreagrandi/snippetbox/pkg/models"
 )
@@ -50,24 +52,54 @@ func (app *application) showSnippet(w http.ResponseWriter, r *http.Request) {
 
 // Add a new createSnippetForm handler, which for now returns a placeholder response.
 func (app *application) createSnippetForm(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("Create a new snippet..."))
+	app.render(w, r, "create.page.tmpl", nil)
 }
 
 func (app *application) createSnippet(w http.ResponseWriter, r *http.Request) {
-	// Create some variables holding dummy data. We'll remove these later on
-	// during the build.
-	title := "O snail"
-	content := "O snail\nClimb Mount Fuji,\nBut slowly, slowly!\n\n– Kobayashi Issa"
-	expires := "7"
+	err := r.ParseForm()
+	if err != nil {
+		app.clientError(w, http.StatusBadRequest)
+		return
+	}
 
-	// Pass the data to the SnippetModel.Insert() method, receiving the
-	// ID of the new record back.
+	title := r.PostForm.Get("title")
+	content := r.PostForm.Get("content")
+	expires := r.PostForm.Get("expires")
+
+	errors := make(map[string]string)
+
+	if strings.TrimSpace(title) == "" {
+		errors["title"] = "This field cannot be blank"
+	} else if utf8.RuneCountInString(title) > 100 {
+		errors["title"] = "This field is too long (maximum is 100 characters)"
+	}
+
+	if strings.TrimSpace(content) == "" {
+		errors["content"] = "This field cannot be blank"
+	}
+
+	if strings.TrimSpace(expires) == "" {
+		errors["expires"] = "This field cannot be blank"
+	} else if expires != "365" && expires != "7" && expires != "1" {
+		errors["expires"] = "This field is invalid"
+	}
+
+	// If there are any validation errors, re-display the create.page.tmpl
+	// template passing in the validation errors and previously submitted
+	// r.PostForm data.
+	if len(errors) > 0 {
+		app.render(w, r, "create.page.tmpl", &templateData{
+			FormErrors: errors,
+			FormData:   r.PostForm,
+		})
+		return
+	}
+
 	id, err := app.snippets.Insert(title, content, expires)
 	if err != nil {
 		app.serverError(w, err)
 		return
 	}
 
-	// Redirect the user to the relevant page for the snippet.
-	http.Redirect(w, r, fmt.Sprintf("/snippet/%id", id), http.StatusSeeOther)
+	http.Redirect(w, r, fmt.Sprintf("/snippet/%d", id), http.StatusSeeOther)
 }
